@@ -1,0 +1,51 @@
+version: '3.8'
+
+services:
+  sop-finder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sop-finder:latest
+    container_name: sop-finder
+    
+    # Interactive mode - allows user input
+    stdin_open: true
+    tty: true
+    
+    # Environment variables (override defaults)
+    environment:
+      - MODEL_NAME=all-MiniLM-L6-v2
+      - MODEL_CACHE_DIR=/app/models
+      - DEFAULT_INDEX_PATH=/app/data/sop_index.pkl
+      - DEFAULT_SOP_FILE=/app/data/structured_sops.txt
+      - DEFAULT_TOP_K=5
+      - DEFAULT_SEMANTIC_WEIGHT=0.6
+      - DEFAULT_BM25_WEIGHT=0.4
+      - CONFIDENCE_THRESHOLD_HIGH=0.70
+      - CONFIDENCE_THRESHOLD_MEDIUM=0.40
+    
+    # Volume mounts for persistence
+    volumes:
+      # Mount data directory for SOP files and generated indexes
+      - ./data:/app/data
+      
+      # Optional: Mount models directory to cache across rebuilds
+      # - ./models:/app/models
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 512M
+
+# Optional: Add a volume for persistent data
+volumes:
+  sop_data:
+    driver: local

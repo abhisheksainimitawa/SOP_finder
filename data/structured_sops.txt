@@ -1,0 +1,2639 @@
+SOP-001: Database Service Outage Response
+
+## Purpose
+This procedure provides step-by-step instructions for responding to complete database service outages to minimize downtime and restore service quickly.
+
+## Scope
+This SOP applies to all production database instances including primary, secondary, and read-replica databases across all environments.
+
+## Responsibilities
+- **On-call Engineer**: Execute immediate response steps
+- **Database Administrator**: Perform advanced troubleshooting and recovery
+- **Incident Commander**: Coordinate response and communications
+- **Communications Lead**: Update stakeholders and customers
+
+## Detection Methods
+The following indicators suggest a database outage:
+- Monitoring tools (DataDog, New Relic, Prometheus) trigger critical alerts
+- Application error logs show database connection timeouts or "connection refused" errors
+- Health check endpoints return 503 Service Unavailable status
+- Customer reports of application unavailability
+- Dashboard shows 0% database availability metrics
+
+## Immediate Response Procedure
+
+### Step 1: Verify Outage (Estimated Time: 2-3 minutes)
+1. Confirm the alert is not a false positive by checking multiple monitoring sources
+2. Test database connectivity from application servers using telnet or ping:
+   ```
+   telnet [database-host] [port]
+   ping [database-host]
+   ```
+3. Check if the issue affects all database instances or only specific ones
+4. Verify application servers can reach the database network segment
+
+### Step 2: Initial Assessment (Estimated Time: 3-5 minutes)
+1. Log into the database server via SSH or console access
+2. Check if the database service is running:
+   ```
+   systemctl status postgresql  # For PostgreSQL
+   systemctl status mysql       # For MySQL
+   ```
+3. Review system resources immediately:
+   - CPU usage: `top` or `htop`
+   - Memory usage: `free -h`
+   - Disk space: `df -h`
+   - Disk I/O: `iostat -x 1 5`
+
+### Step 3: Service Recovery Attempt (Estimated Time: 5-10 minutes)
+1. If database service is stopped, attempt restart:
+   ```
+   systemctl start postgresql
+   systemctl start mysql
+   ```
+2. Monitor service startup in real-time:
+   ```
+   tail -f /var/log/postgresql/postgresql.log
+   tail -f /var/log/mysql/error.log
+   ```
+3. If restart fails, check for:
+   - Corrupted lock files in data directory
+   - Insufficient disk space for logs
+   - Port conflicts with other services
+   - File permission issues
+
+### Step 4: Escalation (If service doesn't recover in 10 minutes)
+1. Notify Database Administrator via page/call
+2. Engage Incident Commander if outage exceeds 15 minutes
+3. Prepare for potential failover to standby database
+4. Begin customer communication process
+
+## Root Cause Analysis Process
+1. **Log Analysis**: Review database logs for the 24 hours preceding the outage
+   - Error messages indicating corruption
+   - Out-of-memory conditions
+   - Connection limit exceeded
+   - Storage-related errors
+
+2. **Change Review**: Examine recent changes:
+   - Database schema modifications
+   - Configuration changes
+   - Infrastructure updates
+   - Application deployments
+
+3. **Resource Analysis**: Investigate resource exhaustion:
+   - Disk space trends over past week
+   - Memory usage patterns
+   - CPU utilization spikes
+   - Network connectivity issues
+
+## Resolution Steps
+1. **Address Root Cause**: Based on RCA findings:
+   - Repair corrupted database files using vendor tools
+   - Increase memory allocation if OOM detected
+   - Expand disk space if storage full
+   - Fix configuration errors identified
+
+2. **Validate Recovery**:
+   - Perform database connectivity tests from all application servers
+   - Run basic CRUD operations to verify database functionality
+   - Monitor key performance metrics for 30 minutes
+   - Verify all dependent applications are functioning
+
+3. **Restart Dependent Services**:
+   - Application servers that cache database connections
+   - Background job processors
+   - API gateways with database health checks
+
+## Post-Incident Activities
+1. **Documentation**: Update incident log with:
+   - Timeline of events
+   - Actions taken and their outcomes
+   - Root cause determination
+   - Time to resolution
+
+2. **Monitoring Improvements**:
+   - Add alerts for conditions that led to the outage
+   - Implement proactive monitoring for disk space, memory, and CPU
+   - Set up database connection pool monitoring
+
+3. **Process Review**:
+   - Evaluate backup and recovery procedures
+   - Test failover capabilities to standby systems
+   - Review and update this SOP based on lessons learned
+   - Schedule follow-up infrastructure hardening tasks
+
+## Prevention Measures
+- Implement automated database health checks every 5 minutes
+- Set up disk space alerts at 80% and 90% thresholds
+- Configure database connection pooling with proper limits
+- Establish regular backup testing procedures
+- Maintain updated runbooks for database recovery scenarios
+
+
+---
+
+SOP-002: Database Performance Degradation Response
+
+## Purpose
+This procedure addresses situations where database performance significantly degrades, causing slow application response times and poor user experience.
+
+## Scope
+Applies to all database performance issues including high query latency, connection timeouts, and resource contention scenarios.
+
+## Responsibilities
+- **On-call Engineer**: Execute initial diagnosis and quick fixes
+- **Database Administrator**: Perform detailed performance analysis and optimization
+- **Development Team**: Assist with query optimization and code review
+
+## Detection Methods
+Performance degradation indicators include:
+- Database query response times exceed 5 seconds for typical operations
+- Application response times increase by 200% or more
+- Database connection pool exhaustion alerts
+- CPU usage consistently above 80% on database servers
+- High number of slow query log entries
+- Lock wait timeouts in database logs
+
+## Immediate Response Procedure
+
+### Step 1: Confirm Performance Issue (Estimated Time: 2-3 minutes)
+1. Check application performance metrics in monitoring dashboard
+2. Verify database response time metrics show degradation
+3. Identify if issue affects read operations, write operations, or both
+4. Determine scope - single database, specific tables, or system-wide
+
+### Step 2: Identify Resource Bottlenecks (Estimated Time: 5-7 minutes)
+1. **Check CPU Usage**:
+   ```
+   top -p $(pgrep postgres)  # For PostgreSQL
+   mysqladmin processlist    # For MySQL
+   ```
+
+2. **Monitor Memory Usage**:
+   ```
+   free -h
+   cat /proc/meminfo | grep -E "(MemTotal|MemFree|Buffers|Cached)"
+   ```
+
+3. **Analyze Disk I/O**:
+   ```
+   iostat -x 1 5
+   iotop -o  # Show only processes doing I/O
+   ```
+
+4. **Check Network Performance**:
+   ```
+   netstat -i
+   ss -tuln | grep [database-port]
+   ```
+
+### Step 3: Identify Problematic Queries (Estimated Time: 5-10 minutes)
+1. **For PostgreSQL**:
+   ```sql
+   SELECT query, calls, total_time, mean_time 
+   FROM pg_stat_statements 
+   ORDER BY total_time DESC LIMIT 10;
+   
+   SELECT pid, usename, application_name, state, query_start, query
+   FROM pg_stat_activity 
+   WHERE state != 'idle' 
+   ORDER BY query_start;
+   ```
+
+2. **For MySQL**:
+   ```sql
+   SELECT * FROM performance_schema.events_statements_summary_by_digest 
+   ORDER BY SUM_TIMER_WAIT DESC LIMIT 10;
+   
+   SHOW PROCESSLIST;
+   ```
+
+3. **Check for Lock Contention**:
+   - PostgreSQL: Query `pg_locks` and `pg_stat_activity` tables
+   - MySQL: Use `SHOW ENGINE INNODB STATUS` command
+
+### Step 4: Immediate Optimization Actions (Estimated Time: 10-15 minutes)
+1. **Kill Long-Running Queries** (if safe to do so):
+   ```sql
+   -- PostgreSQL
+   SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE query_start < now() - interval '10 minutes';
+   
+   -- MySQL
+   KILL [connection_id];
+   ```
+
+2. **Check and Optimize Indexes**:
+   - Identify missing indexes for slow queries
+   - Look for unused indexes consuming resources
+   - Check index fragmentation levels
+
+3. **Adjust Database Configuration** (temporary measures):
+   - Increase connection pool size if needed
+   - Adjust query timeout settings
+   - Modify buffer pool size if memory available
+
+## Root Cause Analysis Process
+1. **Query Analysis**:
+   - Review execution plans for slow queries
+   - Identify table scans instead of index usage
+   - Check for inefficient JOIN operations
+   - Analyze WHERE clause selectivity
+
+2. **Index Assessment**:
+   - Review index usage statistics
+   - Identify duplicate or redundant indexes
+   - Check for missing composite indexes
+   - Analyze index fragmentation levels
+
+3. **Traffic Pattern Review**:
+   - Compare current load with historical patterns
+   - Identify unusual spikes in specific query types
+   - Check for batch operations running during peak hours
+   - Review application deployment timeline
+
+4. **Resource Utilization Analysis**:
+   - Analyze memory allocation patterns
+   - Review disk I/O patterns and storage performance
+   - Check network latency between application and database servers
+
+## Resolution Steps
+1. **Query Optimization**:
+   - Rewrite inefficient queries using proper JOIN syntax
+   - Add appropriate indexes based on query patterns
+   - Implement query result caching where applicable
+   - Optimize WHERE clauses for better selectivity
+
+2. **Database Tuning**:
+   - Adjust buffer pool sizes based on workload
+   - Optimize connection pool configuration
+   - Tune checkpoint and WAL settings
+   - Configure proper timeout values
+
+3. **Infrastructure Scaling**:
+   - Scale database server resources (CPU, memory, storage)
+   - Implement read replicas for read-heavy workloads
+   - Consider database sharding for very large datasets
+   - Optimize storage performance (SSD, RAID configuration)
+
+## Post-Incident Activities
+1. **Performance Baseline Update**:
+   - Document new performance metrics after optimization
+   - Update alerting thresholds based on new baseline
+   - Create performance trending reports
+
+2. **Monitoring Enhancement**:
+   - Add alerts for slow query detection
+   - Implement database connection pool monitoring
+   - Set up resource utilization trending
+   - Create automated index usage reporting
+
+3. **Process Improvements**:
+   - Schedule regular performance review sessions
+   - Implement automated performance testing in CI/CD
+   - Create query performance guidelines for developers
+   - Establish database code review processes
+
+## Prevention Measures
+- Implement automated slow query logging and analysis
+- Set up proactive performance monitoring with predictive alerts
+- Establish regular database maintenance windows for optimization tasks
+- Create performance testing procedures for application releases
+- Maintain database performance documentation and best practices
+
+---
+
+SOP-003: Application Service Outage Response
+
+## Purpose
+This procedure provides comprehensive instructions for diagnosing and resolving application service outages to restore normal service operations quickly and effectively.
+
+## Scope
+Applies to all application services including web applications, API services, microservices, and background processing applications across all environments.
+
+## Responsibilities
+- **On-call Engineer**: Execute immediate response and basic troubleshooting
+- **Application Developer**: Assist with code-related issues and deployment rollbacks
+- **DevOps Engineer**: Handle infrastructure and deployment pipeline issues
+- **Incident Commander**: Coordinate response for critical applications
+
+## Detection Methods
+Application outage indicators include:
+- Health check endpoints return non-200 HTTP status codes
+- Load balancer reports all backend servers as unhealthy
+- Monitoring tools show 0% application availability
+- Customer reports of service unavailability
+- Error rate spikes to >50% in application logs
+- Application process not found in system process list
+
+## Immediate Response Procedure
+
+### Step 1: Verify and Assess Outage (Estimated Time: 2-3 minutes)
+1. **Confirm Service Status**:
+   ```bash
+   curl -I http://[application-url]/health
+   systemctl status [application-service]
+   ps aux | grep [application-process]
+   ```
+
+2. **Check Load Balancer Status**:
+   - Review load balancer dashboard for backend health
+   - Verify if issue affects all instances or subset
+   - Check if traffic is being routed properly
+
+3. **Validate Network Connectivity**:
+   ```bash
+   ping [application-server]
+   telnet [application-server] [port]
+   netstat -tlnp | grep [port]
+   ```
+
+### Step 2: Examine Application Logs (Estimated Time: 3-5 minutes)
+1. **Check Recent Error Logs**:
+   ```bash
+   tail -n 100 /var/log/[application]/error.log
+   journalctl -u [application-service] --since "10 minutes ago"
+   grep -i "error\|exception\|fatal" /var/log/[application]/app.log | tail -20
+   ```
+
+2. **Look for Specific Error Patterns**:
+   - Out of Memory (OOM) errors
+   - Database connection failures
+   - File system permission issues
+   - Configuration parsing errors
+   - Port binding conflicts
+
+3. **Check System Resource Usage**:
+   ```bash
+   top -p $(pgrep [application-process])
+   free -h
+   df -h
+   ```
+
+### Step 3: Attempt Service Recovery (Estimated Time: 5-10 minutes)
+1. **Restart Application Service**:
+   ```bash
+   systemctl restart [application-service]
+   # Or for containerized applications
+   docker restart [container-name]
+   kubectl rollout restart deployment/[deployment-name]
+   ```
+
+2. **Monitor Service Startup**:
+   ```bash
+   systemctl status [application-service]
+   tail -f /var/log/[application]/startup.log
+   ```
+
+3. **Verify Service Recovery**:
+   - Test health check endpoint
+   - Perform basic functionality tests
+   - Check if service accepts connections
+   - Validate in load balancer dashboard
+
+### Step 4: Check Dependencies (Estimated Time: 5-7 minutes)
+1. **Database Connectivity**:
+   ```bash
+   # Test database connection
+   telnet [db-host] [db-port]
+   # Application-specific database test
+   [application-cli] test-db-connection
+   ```
+
+2. **External Service Dependencies**:
+   - Test API endpoints the application depends on
+   - Check authentication services
+   - Verify third-party service status pages
+
+3. **Internal Service Dependencies**:
+   - Check microservice health endpoints
+   - Verify message queue connectivity
+   - Test cache service availability
+
+### Step 5: Rollback Decision (If restart fails)
+1. **Identify Recent Deployments**:
+   ```bash
+   git log --oneline -10
+   kubectl rollout history deployment/[deployment-name]
+   ```
+
+2. **Execute Rollback** (if recent deployment suspected):
+   ```bash
+   # Git-based rollback
+   git revert [commit-hash]
+   [deployment-tool] deploy [previous-version]
+   
+   # Kubernetes rollback
+   kubectl rollout undo deployment/[deployment-name]
+   ```
+
+3. **Notify Development Team**:
+   - Alert team about rollback action
+   - Request code review for problematic deployment
+   - Schedule post-incident review
+
+## Root Cause Analysis Process
+1. **Code Analysis**:
+   - Review recent code changes and commits
+   - Analyze exception stack traces from logs
+   - Check for memory leaks or resource exhaustion
+   - Validate configuration changes
+
+2. **Infrastructure Review**:
+   - Examine server resource utilization trends
+   - Check for network connectivity issues
+   - Review security policy changes
+   - Analyze infrastructure monitoring data
+
+3. **Dependency Analysis**:
+   - Review external service status and performance
+   - Check database performance and connectivity
+   - Analyze third-party API response times
+   - Verify authentication and authorization services
+
+4. **Deployment Process Review**:
+   - Examine CI/CD pipeline logs
+   - Review deployment scripts and configurations
+   - Check for environment-specific issues
+   - Validate pre-deployment testing procedures
+
+## Resolution Steps
+1. **Fix Identified Issues**:
+   - Correct code bugs causing application crashes
+   - Resolve configuration errors or missing variables
+   - Address resource allocation problems
+   - Fix dependency connectivity issues
+
+2. **Implement Protective Measures**:
+   - Add retry logic for external service calls
+   - Implement circuit breakers for unstable dependencies
+   - Add proper error handling and graceful degradation
+   - Configure appropriate resource limits
+
+3. **Validate Fix**:
+   - Deploy corrected version to staging environment
+   - Perform comprehensive testing
+   - Monitor application performance for 30 minutes
+   - Verify all features work as expected
+
+## Post-Incident Activities
+1. **Incident Documentation**:
+   - Create detailed timeline of events
+   - Document root cause analysis findings
+   - Record actions taken and their effectiveness
+   - Calculate total downtime and impact
+
+2. **Monitoring Improvements**:
+   - Add health checks for critical application components
+   - Implement dependency monitoring alerts
+   - Set up application performance monitoring
+   - Create automated failure detection systems
+
+3. **Process Enhancement**:
+   - Conduct blameless post-mortem meeting
+   - Update deployment procedures and checklists
+   - Improve testing procedures to catch similar issues
+   - Review and update this SOP based on lessons learned
+
+## Prevention Measures
+- Implement comprehensive automated testing in CI/CD pipeline
+- Set up canary deployments for gradual rollouts
+- Establish proper application health monitoring
+- Create automated rollback triggers for critical failures
+- Maintain updated application dependency documentation
+- Implement chaos engineering practices to test resilience
+
+---
+
+SOP-004: High CPU and Memory Usage Response
+
+## Purpose
+This procedure provides systematic steps to diagnose and resolve high CPU and memory usage issues that can impact system performance and stability.
+
+## Scope
+Applies to all servers and applications experiencing resource contention, including web servers, database servers, application servers, and containerized environments.
+
+## Responsibilities
+- **On-call Engineer**: Execute immediate diagnostic and mitigation steps
+- **System Administrator**: Perform advanced system tuning and optimization
+- **Application Team**: Address application-specific resource optimization
+- **Infrastructure Team**: Handle scaling and capacity planning decisions
+
+## Detection Methods
+High resource usage indicators include:
+- CPU utilization consistently above 80% for more than 5 minutes
+- Memory usage above 90% with low free memory available
+- System load average exceeding number of CPU cores
+- Monitoring alerts for resource threshold violations
+- Application response time degradation
+- Out-of-Memory (OOM) killer activations in system logs
+
+## Immediate Response Procedure
+
+### Step 1: Assess Current Resource Usage (Estimated Time: 2-3 minutes)
+1. **Check Overall System Resources**:
+   ```bash
+   top -b -n 1
+   htop  # If available
+   free -h
+   cat /proc/loadavg
+   ```
+
+2. **Identify Resource-Heavy Processes**:
+   ```bash
+   # Top CPU consumers
+   ps aux --sort=-%cpu | head -10
+   
+   # Top memory consumers
+   ps aux --sort=-%mem | head -10
+   
+   # Check for zombie processes
+   ps aux | grep -E "(Z|<defunct>)"
+   ```
+
+3. **Check System Load History**:
+   ```bash
+   uptime
+   w  # Show logged-in users and their processes
+   ```
+
+### Step 2: Detailed Process Analysis (Estimated Time: 3-5 minutes)
+1. **Analyze High CPU Usage**:
+   ```bash
+   # Monitor specific process
+   top -p [PID]
+   
+   # Check process threads
+   ps -eLf | grep [process-name]
+   
+   # CPU usage per core
+   mpstat -P ALL 1 5
+   ```
+
+2. **Analyze Memory Usage**:
+   ```bash
+   # Detailed memory breakdown
+   cat /proc/meminfo
+   
+   # Memory usage by process
+   pmap -d [PID]
+   
+   # Check for memory leaks
+   ps -eo pid,ppid,cmd,%mem,%cpu --sort=-%mem | head -10
+   ```
+
+3. **Check for I/O Wait**:
+   ```bash
+   iostat -x 1 5
+   iotop -o  # Show only processes doing I/O
+   ```
+
+### Step 3: Immediate Mitigation Actions (Estimated Time: 5-10 minutes)
+1. **For High CPU Usage**:
+   ```bash
+   # Reduce process priority (if safe)
+   renice 10 [PID]
+   
+   # Limit CPU usage (if cpulimit is available)
+   cpulimit -p [PID] -l 50  # Limit to 50% CPU
+   
+   # Check for CPU-intensive cron jobs
+   crontab -l
+   cat /etc/crontab
+   ```
+
+2. **For High Memory Usage**:
+   ```bash
+   # Clear system caches (safe operation)
+   sync
+   echo 3 > /proc/sys/vm/drop_caches
+   
+   # Check swap usage
+   swapon -s
+   cat /proc/swaps
+   
+   # Review memory-mapped files
+   lsof | grep -E "(deleted|SYSV)"
+   ```
+
+3. **Emergency Process Management**:
+   ```bash
+   # Kill specific problematic process (last resort)
+   kill -TERM [PID]  # Graceful termination
+   kill -KILL [PID]  # Force kill if needed
+   
+   # Restart application service if identified as culprit
+   systemctl restart [service-name]
+   ```
+
+### Step 4: Scale Resources (Estimated Time: 10-15 minutes)
+1. **Horizontal Scaling** (if load balancer configured):
+   ```bash
+   # Add more application instances
+   docker-compose scale [service-name]=3
+   kubectl scale deployment [deployment-name] --replicas=3
+   ```
+
+2. **Vertical Scaling** (cloud environments):
+   - Increase instance size temporarily
+   - Add more memory or CPU cores
+   - Monitor improvement after scaling
+
+3. **Container Resource Adjustments**:
+   ```bash
+   # Update container resource limits
+   docker update --memory=2g --cpus=2 [container-name]
+   ```
+
+## Root Cause Analysis Process
+1. **Memory Leak Investigation**:
+   - Monitor memory usage trends over time using historical data
+   - Use tools like `valgrind` or `gdb` for application debugging
+   - Check for growing heap sizes in application metrics
+   - Review application logs for memory allocation patterns
+
+2. **CPU Usage Pattern Analysis**:
+   - Identify if CPU spikes correlate with specific operations
+   - Check for infinite loops or inefficient algorithms
+   - Analyze database query performance
+   - Review concurrent user load patterns
+
+3. **Traffic and Load Analysis**:
+   - Compare current traffic with historical patterns
+   - Identify unusual spikes in user activity
+   - Check for DDoS attacks or bot traffic
+   - Review application performance metrics
+
+4. **System Configuration Review**:
+   - Check JVM heap settings for Java applications
+   - Review garbage collection logs and patterns
+   - Analyze application configuration parameters
+   - Validate system kernel parameters
+
+## Resolution Steps
+1. **Application Optimization**:
+   - Fix memory leaks in application code
+   - Optimize database queries and connection pooling
+   - Implement proper caching strategies
+   - Add pagination for large data sets
+   - Optimize image and asset loading
+
+2. **System Tuning**:
+   ```bash
+   # Optimize kernel parameters
+   echo 'vm.swappiness=10' >> /etc/sysctl.conf
+   echo 'vm.dirty_ratio=15' >> /etc/sysctl.conf
+   echo 'vm.dirty_background_ratio=5' >> /etc/sysctl.conf
+   sysctl -p
+   ```
+
+3. **Resource Limit Configuration**:
+   ```bash
+   # Set application resource limits
+   echo '[user] soft nproc 65536' >> /etc/security/limits.conf
+   echo '[user] hard nproc 65536' >> /etc/security/limits.conf
+   echo '[user] soft nofile 65536' >> /etc/security/limits.conf
+   echo '[user] hard nofile 65536' >> /etc/security/limits.conf
+   ```
+
+4. **Infrastructure Scaling**:
+   - Implement auto-scaling policies
+   - Upgrade server hardware specifications
+   - Distribute load across multiple servers
+   - Implement content delivery networks (CDN)
+
+## Post-Incident Activities
+1. **Performance Baseline Documentation**:
+   - Record normal CPU and memory usage patterns
+   - Document peak usage periods and causes
+   - Create resource utilization trending reports
+   - Update capacity planning models
+
+2. **Monitoring Enhancement**:
+   - Add proactive alerting for resource usage trends
+   - Implement application performance monitoring (APM)
+   - Set up automated scaling triggers
+   - Create resource usage dashboards for different time periods
+
+3. **Process Improvements**:
+   - Review and update application performance testing procedures
+   - Implement regular performance profiling sessions
+   - Create resource optimization guidelines for developers
+   - Establish regular system health checks
+
+## Prevention Measures
+- Implement comprehensive application performance monitoring
+- Set up automated scaling based on resource usage thresholds
+- Establish regular performance testing and optimization cycles
+- Create resource usage forecasting and capacity planning processes
+- Implement proper resource limits and quotas for all applications
+- Set up automated memory leak detection and alerting
+
+---
+
+SOP-005: Disk Space Management and Recovery
+
+## Purpose
+This procedure provides comprehensive steps to handle disk space exhaustion scenarios, prevent data loss, and restore normal system operations when storage capacity reaches critical levels.
+
+## Scope
+Applies to all servers and storage systems including application servers, database servers, log servers, and backup storage across all environments.
+
+## Responsibilities
+- **On-call Engineer**: Execute immediate space recovery actions
+- **System Administrator**: Perform detailed cleanup and optimization
+- **DevOps Engineer**: Implement automated cleanup solutions
+- **Storage Team**: Handle storage expansion and optimization
+
+## Detection Methods
+Disk space issues are indicated by:
+- Monitoring alerts showing disk usage above 85% threshold
+- Applications failing with "No space left on device" errors
+- Log files showing write failures due to insufficient space
+- Database operations failing due to storage constraints
+- Backup processes failing with storage-related errors
+- System becoming unresponsive due to lack of temporary space
+
+## Immediate Response Procedure
+
+### Step 1: Assess Disk Usage (Estimated Time: 2-3 minutes)
+1. **Check Overall Disk Usage**:
+   ```bash
+   df -h
+   df -i  # Check inode usage
+   lsblk  # Show block devices
+   ```
+
+2. **Identify Critical Filesystems**:
+   ```bash
+   # Sort filesystems by usage percentage
+   df -h | sort -k 5 -nr
+   
+   # Check for 100% usage
+   df -h | grep -E "(100%|9[5-9]%)"
+   ```
+
+3. **Quick Space Assessment**:
+   ```bash
+   # Find largest directories
+   du -sh /* 2>/dev/null | sort -hr | head -10
+   
+   # Check temporary directories
+   du -sh /tmp /var/tmp /var/log
+   ```
+
+### Step 2: Emergency Space Recovery (Estimated Time: 5-10 minutes)
+1. **Clean Temporary Files**:
+   ```bash
+   # Clean system temporary files
+   find /tmp -type f -atime +7 -delete
+   find /var/tmp -type f -atime +7 -delete
+   
+   # Clean old core dumps
+   find /var/crash -name "*.crash" -mtime +7 -delete 2>/dev/null
+   
+   # Clean package manager caches
+   apt-get clean        # Ubuntu/Debian
+   yum clean all        # RHEL/CentOS
+   dnf clean all        # Fedora
+   ```
+
+2. **Rotate and Compress Large Log Files**:
+   ```bash
+   # Identify large log files
+   find /var/log -type f -size +100M
+   
+   # Compress large log files
+   gzip /var/log/[large-log-file]
+   
+   # Truncate active log files (if safe)
+   > /var/log/[active-log-file]
+   
+   # Force log rotation
+   logrotate -f /etc/logrotate.conf
+   ```
+
+3. **Remove Old Files**:
+   ```bash
+   # Find and remove old backup files
+   find /backup -name "*.bak" -mtime +30 -delete
+   find /backup -name "*.old" -mtime +30 -delete
+   
+   # Clean old archive files
+   find /var/backups -name "*.tar.gz" -mtime +60 -delete
+   
+   # Remove old download files
+   find /home/*/Downloads -type f -mtime +30 -delete 2>/dev/null
+   ```
+
+### Step 3: Application-Specific Cleanup (Estimated Time: 5-15 minutes)
+1. **Database Cleanup**:
+   ```bash
+   # Clean MySQL binary logs (if safe)
+   mysql -e "PURGE BINARY LOGS BEFORE DATE(NOW() - INTERVAL 7 DAY);"
+   
+   # PostgreSQL log cleanup
+   find /var/lib/postgresql/*/main/log -name "*.log" -mtime +7 -delete
+   
+   # Clean database temporary files
+   find /var/lib/mysql -name "#sql*" -delete 2>/dev/null
+   ```
+
+2. **Application Log Cleanup**:
+   ```bash
+   # Application-specific log cleanup
+   find /var/log/nginx -name "*.log.*" -mtime +14 -delete
+   find /var/log/apache2 -name "*.log.*" -mtime +14 -delete
+   find /var/log/application -name "*.log" -mtime +30 -delete
+   
+   # Docker log cleanup
+   docker system prune -f
+   docker volume prune -f
+   ```
+
+3. **System Package Cleanup**:
+   ```bash
+   # Remove old kernel versions (Ubuntu)
+   apt autoremove --purge
+   
+   # Clean orphaned packages
+   deborphan | xargs apt-get -y remove --purge  # Debian/Ubuntu
+   package-cleanup --leaves --all               # RHEL/CentOS
+   ```
+
+### Step 4: Move Data to Alternative Storage (If cleanup insufficient)
+1. **Identify Movable Data**:
+   ```bash
+   # Find largest files that can be moved
+   find /var -type f -size +1G | xargs ls -lh
+   
+   # Identify old archive files
+   find /data -name "*.zip" -o -name "*.tar.gz" -mtime +90
+   ```
+
+2. **Move to External Storage**:
+   ```bash
+   # Move to mounted external storage
+   rsync -av /var/log/old_logs/ /external/storage/logs/
+   
+   # Move to cloud storage (if configured)
+   aws s3 sync /data/archives/ s3://backup-bucket/archives/
+   
+   # Create symbolic links if needed
+   ln -s /external/storage/logs /var/log/old_logs
+   ```
+
+## Root Cause Analysis Process
+1. **Growth Pattern Analysis**:
+   - Review disk usage trends over the past 30 days
+   - Identify files or directories with abnormal growth
+   - Check for runaway processes creating large files
+   - Analyze log rotation effectiveness
+
+2. **Log Rotation Review**:
+   ```bash
+   # Check log rotation configuration
+   cat /etc/logrotate.conf
+   cat /etc/logrotate.d/*
+   
+   # Test log rotation
+   logrotate -d /etc/logrotate.conf
+   
+   # Check log rotation status
+   cat /var/lib/logrotate/status
+   ```
+
+3. **Application Behavior Analysis**:
+   - Review application logging levels and verbosity
+   - Check for memory dumps or core files
+   - Identify applications not honoring disk quotas
+   - Analyze backup and archive strategies
+
+4. **Storage Usage Monitoring**:
+   ```bash
+   # Check historical disk usage (if sar is available)
+   sar -d 1 1
+   
+   # Review system messages for storage errors
+   grep -i "space\|storage\|disk" /var/log/messages
+   ```
+
+## Resolution Steps
+1. **Implement Automated Log Rotation**:
+   ```bash
+   # Create comprehensive logrotate configuration
+   cat > /etc/logrotate.d/application << EOF
+   /var/log/application/*.log {
+       daily
+       rotate 30
+       compress
+       delaycompress
+       missingok
+       notifempty
+       postrotate
+           systemctl reload application
+       endscript
+   }
+   EOF
+   ```
+
+2. **Set Up Automated Cleanup Scripts**:
+   ```bash
+   # Create daily cleanup cron job
+   cat > /etc/cron.daily/disk-cleanup << 'EOF'
+   #!/bin/bash
+   # Clean temp files older than 7 days
+   find /tmp -type f -atime +7 -delete
+   
+   # Clean old log files
+   find /var/log -name "*.log.*" -mtime +30 -delete
+   
+   # Clean package caches
+   apt-get clean 2>/dev/null || yum clean all 2>/dev/null
+   EOF
+   chmod +x /etc/cron.daily/disk-cleanup
+   ```
+
+3. **Configure Disk Quotas** (if filesystem supports):
+   ```bash
+   # Enable quotas on filesystem
+   quotacheck -cum /home
+   quotaon /home
+   
+   # Set user quotas
+   edquota -u username
+   ```
+
+4. **Expand Storage** (if budget allows):
+   - Add additional disks to the system
+   - Extend existing logical volumes
+   - Move data to separate partitions
+   - Implement tiered storage solutions
+
+## Post-Incident Activities
+1. **Storage Monitoring Enhancement**:
+   - Set up alerts at 70%, 80%, and 90% disk usage
+   - Implement trend analysis for disk usage growth
+   - Create automated cleanup triggers
+   - Set up inode usage monitoring
+
+2. **Documentation Updates**:
+   - Document all file locations and cleanup procedures
+   - Create disk usage baseline documentation
+   - Update backup and archive policies
+   - Document emergency contact procedures for storage expansion
+
+3. **Policy Implementation**:
+   - Establish log retention policies
+   - Implement application log level management
+   - Create data archival procedures
+   - Set up regular storage capacity reviews
+
+## Prevention Measures
+- Implement proactive disk usage monitoring with predictive alerts
+- Set up automated log rotation for all applications
+- Create scheduled cleanup jobs for temporary and cache files
+- Establish data lifecycle management policies
+- Implement disk quotas where appropriate
+- Set up automated storage capacity planning and expansion procedures
+- Regular review of storage usage patterns and optimization opportunities
+
+---
+
+SOP-006: Network Latency and Connectivity Issue Resolution
+
+## Purpose
+This procedure provides systematic steps to diagnose and resolve network connectivity issues, high latency problems, and network-related service disruptions.
+
+## Scope
+Applies to all network connectivity issues including inter-server communication, external API connectivity, DNS resolution problems, and performance degradation due to network issues.
+
+## Responsibilities
+- **On-call Engineer**: Execute initial network diagnostics and basic troubleshooting
+- **Network Administrator**: Perform advanced network analysis and configuration changes
+- **Infrastructure Team**: Handle routing, firewall, and network equipment issues
+- **Security Team**: Address security-related network restrictions and policies
+
+## Detection Methods
+Network issues are indicated by:
+- Application timeout errors when connecting to external services
+- High response times reported by monitoring tools (>5 seconds)
+- DNS resolution failures in application logs
+- Packet loss detected by network monitoring
+- Users reporting slow application performance
+- Load balancer health checks failing due to network timeouts
+
+## Immediate Response Procedure
+
+### Step 1: Basic Connectivity Testing (Estimated Time: 3-5 minutes)
+1. **Test Basic Network Connectivity**:
+   ```bash
+   # Test connectivity to target hosts
+   ping -c 4 [target-host]
+   ping -c 4 8.8.8.8  # Test internet connectivity
+   
+   # Test specific service ports
+   telnet [target-host] [port]
+   nc -zv [target-host] [port]  # If netcat is available
+   ```
+
+2. **DNS Resolution Testing**:
+   ```bash
+   # Test DNS resolution
+   nslookup [hostname]
+   dig [hostname]
+   host [hostname]
+   
+   # Test different DNS servers
+   nslookup [hostname] 8.8.8.8
+   nslookup [hostname] 1.1.1.1
+   ```
+
+3. **Check Local Network Configuration**:
+   ```bash
+   # Display network interfaces
+   ip addr show
+   ifconfig -a
+   
+   # Check routing table
+   ip route show
+   route -n
+   
+   # Check network statistics
+   ss -tuln
+   netstat -tuln
+   ```
+
+### Step 2: Network Path Analysis (Estimated Time: 5-7 minutes)
+1. **Traceroute Analysis**:
+   ```bash
+   # Trace route to destination
+   traceroute [target-host]
+   mtr [target-host]  # If available, provides continuous monitoring
+   
+   # Trace route with specific options
+   traceroute -n [target-host]  # Skip DNS lookups
+   traceroute -T -p [port] [target-host]  # TCP traceroute
+   ```
+
+2. **Network Performance Testing**:
+   ```bash
+   # Test bandwidth and latency
+   ping -c 10 [target-host] | tail -1
+   
+   # Monitor network traffic
+   iftop -i [interface]  # If available
+   nethogs  # If available
+   
+   # Check for packet loss
+   ping -c 100 [target-host] | grep "packet loss"
+   ```
+
+3. **Firewall and Security Checks**:
+   ```bash
+   # Check local firewall rules
+   iptables -L -n -v
+   ufw status  # Ubuntu firewall
+   
+   # Check SELinux status (if applicable)
+   getenforce
+   sestatus
+   
+   # Review recent firewall logs
+   grep -i "drop\|deny\|block" /var/log/iptables.log
+   journalctl -u firewalld --since "1 hour ago"
+   ```
+
+### Step 3: Service-Specific Diagnostics (Estimated Time: 5-10 minutes)
+1. **HTTP/HTTPS Service Testing**:
+   ```bash
+   # Test HTTP connectivity with timing
+   curl -w "@curl-format.txt" -o /dev/null -s [url]
+   
+   # Create curl timing format file
+   cat > curl-format.txt << 'EOF'
+        time_namelookup:  %{time_namelookup}\n
+           time_connect:  %{time_connect}\n
+        time_appconnect:  %{time_appconnect}\n
+       time_pretransfer:  %{time_pretransfer}\n
+          time_redirect:  %{time_redirect}\n
+     time_starttransfer:  %{time_starttransfer}\n
+                        ----------\n
+             time_total:  %{time_total}\n
+   EOF
+   
+   # Test SSL/TLS connectivity
+   openssl s_client -connect [host]:443 -servername [hostname]
+   ```
+
+2. **Database Connectivity Testing**:
+   ```bash
+   # Test database connectivity
+   telnet [db-host] 3306  # MySQL
+   telnet [db-host] 5432  # PostgreSQL
+   
+   # Application-specific database tests
+   mysql -h [db-host] -u [user] -p -e "SELECT 1;"
+   psql -h [db-host] -U [user] -d [database] -c "SELECT 1;"
+   ```
+
+3. **API and Service Endpoints**:
+   ```bash
+   # Test API endpoints with detailed timing
+   time curl -I [api-endpoint]
+   
+   # Test with different HTTP methods
+   curl -X GET [api-endpoint]/health
+   curl -X POST [api-endpoint]/test -d '{"test":"data"}'
+   ```
+
+### Step 4: Network Interface and Traffic Analysis (Estimated Time: 7-10 minutes)
+1. **Interface Statistics**:
+   ```bash
+   # Check interface errors and drops
+   cat /proc/net/dev
+   ethtool [interface]  # If available
+   
+   # Monitor interface traffic
+   watch -n 1 'cat /proc/net/dev'
+   
+   # Check for interface errors
+   ip -s link show [interface]
+   ```
+
+2. **DNS Configuration Review**:
+   ```bash
+   # Check DNS configuration
+   cat /etc/resolv.conf
+   cat /etc/hosts
+   
+   # Test DNS performance
+   dig @8.8.8.8 [hostname] +time=5
+   dig @1.1.1.1 [hostname] +time=5
+   
+   # Check for DNS cache issues
+   systemctl status systemd-resolved  # Ubuntu/Debian
+   service named status               # RHEL/CentOS
+   ```
+
+3. **Load Balancer and Proxy Checks**:
+   ```bash
+   # Check load balancer configuration
+   nginx -t  # Nginx syntax check
+   apache2ctl configtest  # Apache config test
+   
+   # Review proxy logs
+   tail -f /var/log/nginx/access.log
+   tail -f /var/log/nginx/error.log
+   ```
+
+## Root Cause Analysis Process
+1. **Network Infrastructure Analysis**:
+   - Review network topology and routing configurations
+   - Check for recent network equipment changes or updates
+   - Analyze network monitoring data for patterns
+   - Identify potential bottlenecks in network architecture
+
+2. **Traffic Pattern Analysis**:
+   - Compare current network traffic with historical baselines
+   - Identify unusual spikes in network utilization
+   - Check for DDoS attacks or abnormal traffic patterns
+   - Review bandwidth utilization across different network segments
+
+3. **Configuration Review**:
+   - Examine recent changes to firewall rules
+   - Review DNS server configurations and zone files
+   - Check routing table modifications
+   - Analyze load balancer and proxy configurations
+
+4. **External Dependency Analysis**:
+   - Check status of external service providers
+   - Review ISP network status and performance
+   - Analyze third-party API response times
+   - Verify CDN and edge server performance
+
+## Resolution Steps
+1. **Network Configuration Optimization**:
+   ```bash
+   # Optimize network settings
+   echo 'net.core.rmem_max = 16777216' >> /etc/sysctl.conf
+   echo 'net.core.wmem_max = 16777216' >> /etc/sysctl.conf
+   echo 'net.ipv4.tcp_rmem = 4096 65536 16777216' >> /etc/sysctl.conf
+   echo 'net.ipv4.tcp_wmem = 4096 65536 16777216' >> /etc/sysctl.conf
+   sysctl -p
+   ```
+
+2. **DNS Configuration Improvements**:
+   ```bash
+   # Configure reliable DNS servers
+   cat > /etc/resolv.conf << 'EOF'
+   nameserver 8.8.8.8
+   nameserver 1.1.1.1
+   nameserver [internal-dns-server]
+   options timeout:2 attempts:3
+   EOF
+   ```
+
+3. **Routing and Firewall Adjustments**:
+   ```bash
+   # Add specific routes if needed
+   ip route add [network/mask] via [gateway]
+   
+   # Adjust firewall rules for specific services
+   iptables -A INPUT -p tcp --dport [port] -j ACCEPT
+   iptables -A OUTPUT -p tcp --dport [port] -j ACCEPT
+   ```
+
+4. **Load Balancer and Proxy Optimization**:
+   - Configure proper timeout values for upstream servers
+   - Implement connection pooling and keep-alive settings
+   - Add health checks with appropriate intervals
+   - Configure retry logic for failed connections
+
+## Post-Incident Activities
+1. **Network Monitoring Enhancement**:
+   - Add latency monitoring for critical network paths
+   - Implement packet loss detection and alerting
+   - Set up bandwidth utilization monitoring
+   - Create network performance baselines and thresholds
+
+2. **Documentation Updates**:
+   - Document network topology and critical paths
+   - Create network troubleshooting runbooks
+   - Maintain updated contact information for network providers
+   - Document all network configuration changes
+
+3. **Process Improvements**:
+   - Establish regular network performance reviews
+   - Implement automated network health checks
+   - Create network change management procedures
+   - Set up proactive network capacity planning
+
+## Prevention Measures
+- Implement comprehensive network monitoring with proactive alerting
+- Set up redundant network paths for critical services
+- Establish regular network performance testing procedures
+- Create automated network configuration backups
+- Implement network change management and approval processes
+- Set up continuous monitoring of external dependencies and third-party services
+
+---
+
+SOP-007: Deployment Failure Recovery
+
+## Purpose
+This procedure provides comprehensive steps to handle deployment failures, minimize service disruption, and restore applications to a stable state through rollback or fix-forward approaches.
+
+## Scope
+Applies to all deployment scenarios including application deployments, database migrations, infrastructure changes, and configuration updates across all environments.
+
+## Responsibilities
+- **On-call Engineer**: Execute immediate rollback procedures and assess impact
+- **DevOps Engineer**: Handle CI/CD pipeline issues and deployment automation
+- **Development Team**: Provide technical guidance and fix-forward solutions
+- **Release Manager**: Coordinate deployment decisions and stakeholder communication
+
+## Detection Methods
+Deployment failures are indicated by:
+- CI/CD pipeline showing failed deployment status
+- Application health checks failing after deployment
+- Monitoring alerts indicating service degradation post-deployment
+- Customer reports of application unavailability or errors
+- Database migration errors or data inconsistencies
+- Configuration validation failures preventing service startup
+
+## Immediate Response Procedure
+
+### Step 1: Assess Deployment Failure (Estimated Time: 2-3 minutes)
+1. **Check Deployment Pipeline Status**:
+   ```bash
+   # Check CI/CD pipeline logs
+   jenkins console [job-name] [build-number]  # Jenkins
+   gitlab-ci logs [pipeline-id]              # GitLab
+   kubectl rollout status deployment/[name]   # Kubernetes
+   
+   # Check deployment history
+   kubectl rollout history deployment/[name]
+   docker service logs [service-name]
+   ```
+
+2. **Verify Application Status**:
+   ```bash
+   # Test application endpoints
+   curl -I [application-url]/health
+   curl -f [application-url]/api/status
+   
+   # Check service status
+   systemctl status [application-service]
+   docker ps | grep [application-name]
+   kubectl get pods -l app=[application-name]
+   ```
+
+3. **Check Recent Changes**:
+   ```bash
+   # Review recent commits
+   git log --oneline -10
+   git diff HEAD~1 HEAD
+   
+   # Check configuration changes
+   git log --oneline --since="2 hours ago" -- config/
+   ```
+
+### Step 2: Analyze Failure Logs (Estimated Time: 3-5 minutes)
+1. **Application Startup Logs**:
+   ```bash
+   # Check application logs for startup errors
+   tail -n 100 /var/log/[application]/startup.log
+   journalctl -u [application-service] --since "10 minutes ago"
+   kubectl logs -f deployment/[deployment-name]
+   ```
+
+2. **Database Migration Logs**:
+   ```bash
+   # Check migration status and errors
+   grep -i "migration\|error\|fail" /var/log/[application]/db.log
+   
+   # Database-specific checks
+   mysql -e "SELECT * FROM schema_migrations ORDER BY version DESC LIMIT 5;"
+   psql -c "SELECT * FROM schema_migrations ORDER BY version DESC LIMIT 5;"
+   ```
+
+3. **Infrastructure and Configuration Logs**:
+   ```bash
+   # Check infrastructure provisioning logs
+   terraform show
+   ansible-playbook --check [playbook.yml]
+   
+   # Configuration validation
+   nginx -t  # Nginx config test
+   apache2ctl configtest  # Apache config test
+   [application-binary] --config-test  # Application config test
+   ```
+
+### Step 3: Immediate Rollback Decision (Estimated Time: 5-10 minutes)
+1. **Assess Impact Severity**:
+   - Critical: Complete service outage affecting all users
+   - High: Major features unavailable, significant user impact
+   - Medium: Minor features affected, some users impacted
+   - Low: Limited impact, can be fixed forward
+
+2. **Execute Rollback for Critical/High Impact**:
+   ```bash
+   # Git-based rollback
+   git revert [commit-hash]
+   git push origin [branch-name]
+   
+   # Kubernetes rollback
+   kubectl rollout undo deployment/[deployment-name]
+   kubectl rollout undo deployment/[deployment-name] --to-revision=[revision-number]
+   
+   # Docker service rollback
+   docker service update --rollback [service-name]
+   
+   # Database migration rollback
+   rake db:rollback STEP=1  # Rails
+   python manage.py migrate [app-name] [previous-migration]  # Django
+   ```
+
+3. **Verify Rollback Success**:
+   ```bash
+   # Confirm application is running
+   curl -f [application-url]/health
+   
+   # Check service status
+   kubectl get pods -l app=[application-name]
+   systemctl status [application-service]
+   
+   # Verify database consistency
+   [application-cli] db:verify
+   ```
+
+### Step 4: Communication and Coordination (Estimated Time: 5-7 minutes)
+1. **Notify Stakeholders**:
+   - Send deployment failure notification to team
+   - Update status page if customer-facing impact
+   - Inform product owners and management for critical issues
+   - Coordinate with customer support for user communication
+
+2. **Document Initial Findings**:
+   - Record deployment timeline and failure point
+   - Capture error messages and logs
+   - Document rollback actions taken
+   - Estimate time to resolution
+
+## Root Cause Analysis Process
+1. **Code and Configuration Analysis**:
+   - Review code changes that were deployed
+   - Analyze configuration differences between environments
+   - Check for dependency version conflicts
+   - Validate environment variables and secrets
+
+2. **Infrastructure and Environment Review**:
+   - Compare infrastructure state before and after deployment
+   - Check for resource constraints (CPU, memory, disk)
+   - Analyze network connectivity and firewall rules
+   - Review security policy changes
+
+3. **Process and Pipeline Analysis**:
+   - Examine CI/CD pipeline configuration and execution
+   - Review testing procedures and coverage
+   - Analyze deployment automation scripts
+   - Check for human errors in manual deployment steps
+
+4. **Dependency and Integration Analysis**:
+   - Review external service dependencies and their status
+   - Check for API version compatibility issues
+   - Analyze database migration scripts and data changes
+   - Verify third-party service integrations
+
+## Resolution Steps
+1. **Fix-Forward Approach** (for non-critical issues):
+   ```bash
+   # Create hotfix branch
+   git checkout -b hotfix/deployment-fix
+   
+   # Make necessary corrections
+   # ... edit files ...
+   
+   # Test changes locally
+   [test-command]
+   
+   # Deploy hotfix
+   git commit -m "Fix deployment issue: [description]"
+   git push origin hotfix/deployment-fix
+   ```
+
+2. **Deployment Script Validation**:
+   ```bash
+   # Add deployment validation steps
+   cat >> deploy.sh << 'EOF'
+   # Pre-deployment validation
+   if ! [application-binary] --config-test; then
+       echo "Configuration test failed"
+       exit 1
+   fi
+   
+   # Post-deployment verification
+   sleep 30
+   if ! curl -f localhost:8080/health; then
+       echo "Health check failed, rolling back"
+       ./rollback.sh
+       exit 1
+   fi
+   EOF
+   ```
+
+3. **Database Migration Safety**:
+   ```sql
+   -- Add migration safety checks
+   BEGIN;
+   -- Migration steps here
+   -- Verify data integrity
+   SELECT COUNT(*) FROM critical_table;
+   -- Only commit if validation passes
+   COMMIT;
+   ```
+
+4. **Environment Consistency Verification**:
+   ```bash
+   # Create environment validation script
+   cat > validate-environment.sh << 'EOF'
+   #!/bin/bash
+   # Check required environment variables
+   required_vars=("DB_HOST" "API_KEY" "SERVICE_URL")
+   for var in "${required_vars[@]}"; do
+       if [[ -z "${!var}" ]]; then
+           echo "Required variable $var is not set"
+           exit 1
+       fi
+   done
+   
+   # Check service connectivity
+   curl -f $SERVICE_URL/health || exit 1
+   
+   echo "Environment validation passed"
+   EOF
+   ```
+
+## Post-Incident Activities
+1. **Deployment Process Review**:
+   - Analyze deployment checklist completeness
+   - Review testing procedures and coverage gaps
+   - Evaluate rollback procedure effectiveness
+   - Update deployment automation and validation
+
+2. **Monitoring and Alerting Enhancement**:
+   - Add deployment success/failure metrics
+   - Implement automated health checks post-deployment
+   - Set up alerts for deployment-related issues
+   - Create deployment monitoring dashboards
+
+3. **Documentation and Training**:
+   - Update deployment runbooks and procedures
+   - Document lessons learned and best practices
+   - Conduct team training on improved deployment procedures
+   - Create troubleshooting guides for common deployment issues
+
+## Prevention Measures
+- Implement comprehensive automated testing in CI/CD pipeline
+- Set up staging environments that mirror production exactly
+- Establish canary deployments for gradual rollouts
+- Create automated rollback triggers for critical failures
+- Implement infrastructure as code for consistent environments
+- Set up deployment approval workflows for production changes
+
+---
+
+SOP-008: SSL/TLS Certificate Expiry Management
+
+## Purpose
+This procedure provides comprehensive steps to handle SSL/TLS certificate expiry situations, implement emergency certificate renewal, and prevent service disruptions due to expired certificates.
+
+## Scope
+Applies to all SSL/TLS certificates including web server certificates, API endpoint certificates, internal service certificates, and client authentication certificates across all environments.
+
+## Responsibilities
+- **On-call Engineer**: Execute emergency certificate renewal procedures
+- **Security Team**: Manage certificate authorities and security policies
+- **DevOps Engineer**: Handle automated certificate deployment and renewal
+- **System Administrator**: Configure web servers and certificate stores
+
+## Detection Methods
+Certificate expiry issues are indicated by:
+- Browser warnings about invalid or expired certificates
+- HTTPS connection failures with SSL handshake errors
+- Monitoring alerts for certificate expiry dates
+- Application logs showing SSL/TLS verification failures
+- API clients reporting certificate validation errors
+- Load balancer health checks failing due to certificate issues
+
+## Immediate Response Procedure
+
+### Step 1: Identify Expired Certificates (Estimated Time: 2-3 minutes)
+1. **Check Certificate Status**:
+   ```bash
+   # Check certificate expiry for web services
+   echo | openssl s_client -connect [domain]:443 -servername [domain] 2>/dev/null | openssl x509 -noout -dates
+   
+   # Check certificate details
+   openssl x509 -in /path/to/certificate.crt -text -noout | grep -A 2 "Not After"
+   
+   # Check multiple domains
+   for domain in domain1.com domain2.com; do
+       echo "Checking $domain:"
+       echo | openssl s_client -connect $domain:443 -servername $domain 2>/dev/null | openssl x509 -noout -dates
+   done
+   ```
+
+2. **Verify Certificate Chain**:
+   ```bash
+   # Check certificate chain validity
+   openssl s_client -connect [domain]:443 -servername [domain] -verify_return_error
+   
+   # Check intermediate certificates
+   openssl s_client -connect [domain]:443 -servername [domain] -showcerts
+   ```
+
+3. **Assess Service Impact**:
+   ```bash
+   # Test HTTPS endpoints
+   curl -I https://[domain]/
+   curl -k -I https://[domain]/  # Ignore certificate errors
+   
+   # Check specific application endpoints
+   curl -f https://[domain]/api/health
+   curl -f https://[domain]/login
+   ```
+
+### Step 2: Emergency Certificate Renewal (Estimated Time: 10-15 minutes)
+1. **Let's Encrypt Renewal** (if using Certbot):
+   ```bash
+   # Force certificate renewal
+   certbot renew --force-renewal --cert-name [domain]
+   
+   # Dry run to test renewal
+   certbot renew --dry-run
+   
+   # Manual certificate request
+   certbot certonly --manual -d [domain] -d www.[domain]
+   
+   # Check certbot status
+   certbot certificates
+   ```
+
+2. **Commercial Certificate Renewal**:
+   ```bash
+   # Generate new certificate signing request (CSR)
+   openssl req -new -newkey rsa:2048 -nodes -keyout [domain].key -out [domain].csr
+   
+   # If you have existing private key
+   openssl req -new -key [existing-domain].key -out [domain].csr
+   
+   # Verify CSR
+   openssl req -text -noout -verify -in [domain].csr
+   ```
+
+3. **Self-Signed Certificate** (temporary emergency measure):
+   ```bash
+   # Create temporary self-signed certificate
+   openssl req -x509 -newkey rsa:2048 -keyout temp-[domain].key -out temp-[domain].crt -days 30 -nodes
+   
+   # Create certificate with SAN (Subject Alternative Names)
+   cat > temp-cert.conf << EOF
+   [req]
+   distinguished_name = req_distinguished_name
+   req_extensions = v3_req
+   
+   [req_distinguished_name]
+   CN = [domain]
+   
+   [v3_req]
+   subjectAltName = @alt_names
+   
+   [alt_names]
+   DNS.1 = [domain]
+   DNS.2 = www.[domain]
+   EOF
+   
+   openssl req -x509 -newkey rsa:2048 -keyout temp-[domain].key -out temp-[domain].crt -days 30 -nodes -config temp-cert.conf -extensions v3_req
+   ```
+
+### Step 3: Deploy New Certificates (Estimated Time: 5-10 minutes)
+1. **Web Server Configuration**:
+   ```bash
+   # Apache configuration
+   sudo cp [new-certificate].crt /etc/ssl/certs/
+   sudo cp [new-certificate].key /etc/ssl/private/
+   sudo chmod 600 /etc/ssl/private/[new-certificate].key
+   
+   # Update Apache virtual host
+   sudo nano /etc/apache2/sites-available/[site].conf
+   # Update SSLCertificateFile and SSLCertificateKeyFile paths
+   
+   sudo apache2ctl configtest
+   sudo systemctl reload apache2
+   ```
+
+   ```bash
+   # Nginx configuration
+   sudo cp [new-certificate].crt /etc/nginx/ssl/
+   sudo cp [new-certificate].key /etc/nginx/ssl/
+   sudo chmod 600 /etc/nginx/ssl/[new-certificate].key
+   
+   # Update Nginx server block
+   sudo nano /etc/nginx/sites-available/[site]
+   # Update ssl_certificate and ssl_certificate_key paths
+   
+   sudo nginx -t
+   sudo systemctl reload nginx
+   ```
+
+2. **Load Balancer and Proxy Updates**:
+   ```bash
+   # HAProxy certificate update
+   cat [new-certificate].crt [intermediate].crt [new-certificate].key > /etc/haproxy/ssl/[domain].pem
+   sudo systemctl reload haproxy
+   
+   # Cloudflare or CDN certificate update
+   # Use provider's API or web interface to upload new certificate
+   ```
+
+3. **Application Service Certificates**:
+   ```bash
+   # Java keystore update
+   keytool -delete -alias [domain] -keystore /path/to/keystore.jks
+   keytool -import -alias [domain] -file [new-certificate].crt -keystore /path/to/keystore.jks
+   
+   # Docker container certificate update
+   docker cp [new-certificate].crt [container-name]:/etc/ssl/certs/
+   docker cp [new-certificate].key [container-name]:/etc/ssl/private/
+   docker restart [container-name]
+   ```
+
+### Step 4: Verification and Testing (Estimated Time: 5-7 minutes)
+1. **Certificate Validation**:
+   ```bash
+   # Verify new certificate is active
+   echo | openssl s_client -connect [domain]:443 -servername [domain] 2>/dev/null | openssl x509 -noout -dates
+   
+   # Check certificate chain
+   openssl s_client -connect [domain]:443 -servername [domain] -verify_return_error
+   
+   # Test with SSL Labs (online tool)
+   # Navigate to: https://www.ssllabs.com/ssltest/analyze.html?d=[domain]
+   ```
+
+2. **Application Functionality Testing**:
+   ```bash
+   # Test HTTPS endpoints
+   curl -I https://[domain]/
+   curl -f https://[domain]/api/health
+   
+   # Test secure cookie functionality
+   curl -c cookies.txt -b cookies.txt https://[domain]/login -d "user=test&pass=test"
+   
+   # Test WebSocket secure connections (if applicable)
+   wscat -c wss://[domain]/websocket
+   ```
+
+3. **Browser Compatibility Testing**:
+   - Test website in multiple browsers (Chrome, Firefox, Safari, Edge)
+   - Verify no security warnings are displayed
+   - Check that all secure resources load correctly
+   - Test on mobile devices if applicable
+
+## Root Cause Analysis Process
+1. **Certificate Management Review**:
+   - Review certificate inventory and expiry tracking
+   - Analyze why automatic renewal failed
+   - Check certificate authority communication logs
+   - Examine DNS validation or domain verification issues
+
+2. **Monitoring and Alerting Analysis**:
+   - Review certificate monitoring configuration
+   - Check if expiry alerts were sent correctly
+   - Analyze response time to alerts
+   - Evaluate alerting thresholds and notification recipients
+
+3. **Process and Automation Review**:
+   - Examine automated renewal scripts and cron jobs
+   - Check for errors in certificate deployment automation
+   - Review certificate authority API interactions
+   - Analyze backup certificate procedures
+
+## Resolution Steps
+1. **Automated Renewal Implementation**:
+   ```bash
+   # Set up automated Let's Encrypt renewal
+   crontab -e
+   # Add: 0 12 * * * /usr/bin/certbot renew --quiet --post-hook "systemctl reload nginx"
+   
+   # Create renewal monitoring script
+   cat > /usr/local/bin/cert-monitor.sh << 'EOF'
+   #!/bin/bash
+   DOMAINS=("domain1.com" "domain2.com")
+   THRESHOLD=30  # Days before expiry to alert
+   
+   for domain in "${DOMAINS[@]}"; do
+       expiry=$(echo | openssl s_client -connect $domain:443 -servername $domain 2>/dev/null | openssl x509 -noout -enddate | cut -d= -f2)
+       expiry_epoch=$(date -d "$expiry" +%s)
+       current_epoch=$(date +%s)
+       days_until_expiry=$(( (expiry_epoch - current_epoch) / 86400 ))
+       
+       if [ $days_until_expiry -lt $THRESHOLD ]; then
+           echo "Certificate for $domain expires in $days_until_expiry days"
+           # Send alert
+       fi
+   done
+   EOF
+   chmod +x /usr/local/bin/cert-monitor.sh
+   ```
+
+2. **Certificate Inventory Management**:
+   ```bash
+   # Create certificate inventory script
+   cat > /usr/local/bin/cert-inventory.sh << 'EOF'
+   #!/bin/bash
+   echo "Certificate Inventory - $(date)"
+   echo "================================"
+   
+   # Web server certificates
+   for cert in /etc/ssl/certs/*.crt; do
+       if [ -f "$cert" ]; then
+           echo "Certificate: $cert"
+           openssl x509 -in "$cert" -noout -subject -enddate
+           echo "---"
+       fi
+   done
+   
+   # Let's Encrypt certificates
+   if command -v certbot &> /dev/null; then
+       echo "Let's Encrypt Certificates:"
+       certbot certificates
+   fi
+   EOF
+   chmod +x /usr/local/bin/cert-inventory.sh
+   ```
+
+3. **Backup Certificate Procedures**:
+   ```bash
+   # Create certificate backup script
+   cat > /usr/local/bin/cert-backup.sh << 'EOF'
+   #!/bin/bash
+   BACKUP_DIR="/backup/certificates/$(date +%Y%m%d)"
+   mkdir -p "$BACKUP_DIR"
+   
+   # Backup certificates
+   cp -r /etc/ssl/certs/* "$BACKUP_DIR/"
+   cp -r /etc/ssl/private/* "$BACKUP_DIR/"
+   
+   # Backup Let's Encrypt
+   if [ -d "/etc/letsencrypt" ]; then
+       tar -czf "$BACKUP_DIR/letsencrypt-backup.tar.gz" /etc/letsencrypt/
+   fi
+   
+   echo "Certificate backup completed: $BACKUP_DIR"
+   EOF
+   chmod +x /usr/local/bin/cert-backup.sh
+   ```
+
+## Post-Incident Activities
+1. **Certificate Monitoring Enhancement**:
+   - Implement automated certificate expiry monitoring
+   - Set up alerts at 60, 30, and 7 days before expiry
+   - Create certificate inventory and tracking system
+   - Add certificate validation to health checks
+
+2. **Process Documentation**:
+   - Update certificate management procedures
+   - Document all certificate locations and renewal methods
+   - Create emergency contact procedures for certificate authorities
+   - Maintain updated certificate inventory
+
+3. **Automation Improvements**:
+   - Implement automated certificate deployment
+   - Set up certificate authority API integration
+   - Create self-healing certificate renewal systems
+   - Add certificate validation to CI/CD pipelines
+
+## Prevention Measures
+- Implement comprehensive certificate lifecycle management
+- Set up automated renewal with multiple fallback methods
+- Create certificate monitoring dashboards with trend analysis
+- Establish regular certificate audits and compliance checks
+- Implement certificate transparency monitoring
+- Set up automated testing of certificate renewal procedures
+
+---
+
+SOP-009: Security Incident - Unauthorized Access Attempt Response
+
+## Purpose
+This procedure provides comprehensive steps to respond to unauthorized access attempts, contain potential security breaches, and implement protective measures to prevent future incidents.
+
+## Scope
+Applies to all security incidents including failed login attempts, brute force attacks, privilege escalation attempts, unauthorized file access, and suspicious user behavior across all systems and applications.
+
+## Responsibilities
+- **On-call Engineer**: Execute immediate containment and assessment actions
+- **Security Team**: Lead incident response and forensic analysis
+- **System Administrator**: Implement access controls and security hardening
+- **Legal/Compliance Team**: Handle regulatory requirements and reporting
+- **Management**: Coordinate external communication and decision-making
+
+## Detection Methods
+Unauthorized access attempts are indicated by:
+- Multiple failed login attempts from single IP address
+- Successful logins from unusual geographic locations
+- Access attempts outside normal business hours
+- Privilege escalation alerts in security monitoring tools
+- Unusual file access patterns or data exfiltration indicators
+- Security Information and Event Management (SIEM) alerts
+
+## Immediate Response Procedure
+
+### Step 1: Initial Assessment and Containment (Estimated Time: 3-5 minutes)
+1. **Assess Threat Severity**:
+   ```bash
+   # Check failed login attempts
+   grep "Failed password" /var/log/auth.log | tail -20
+   grep "authentication failure" /var/log/secure | tail -20
+   
+   # Check successful logins
+   last -n 20
+   who -a
+   w  # Show currently logged-in users
+   ```
+
+2. **Identify Source of Attack**:
+   ```bash
+   # Analyze log patterns for IP addresses
+   grep "Failed password" /var/log/auth.log | awk '{print $11}' | sort | uniq -c | sort -nr
+   
+   # Check geographic location of IPs (if geoip tools available)
+   geoiplookup [suspicious-ip]
+   whois [suspicious-ip]
+   ```
+
+3. **Immediate IP Blocking**:
+   ```bash
+   # Block suspicious IP addresses
+   iptables -A INPUT -s [suspicious-ip] -j DROP
+   
+   # For persistent blocking
+   echo "[suspicious-ip]" >> /etc/hosts.deny
+   
+   # Using fail2ban (if installed)
+   fail2ban-client set sshd banip [suspicious-ip]
+   fail2ban-client status sshd
+   ```
+
+### Step 2: Account Security Assessment (Estimated Time: 5-7 minutes)
+1. **Check Compromised Accounts**:
+   ```bash
+   # Review recent successful logins
+   grep "Accepted password" /var/log/auth.log | tail -20
+   grep "session opened" /var/log/secure | tail -20
+   
+   # Check sudo usage
+   grep "sudo" /var/log/auth.log | tail -20
+   
+   # Review user account changes
+   grep -E "(useradd|usermod|userdel)" /var/log/auth.log
+   ```
+
+2. **Lock Compromised Accounts**:
+   ```bash
+   # Lock user accounts immediately
+   usermod -L [username]  # Lock account
+   passwd -l [username]   # Lock password
+   
+   # Disable SSH key access
+   mv /home/[username]/.ssh/authorized_keys /home/[username]/.ssh/authorized_keys.disabled
+   
+   # Kill active sessions
+   pkill -u [username]
+   loginctl terminate-user [username]
+   ```
+
+3. **Force Password Reset**:
+   ```bash
+   # Expire passwords for affected accounts
+   chage -d 0 [username]  # Force password change on next login
+   
+   # For application accounts, reset in application database
+   # MySQL example:
+   mysql -e "UPDATE users SET password_reset_required=1 WHERE username='[username]';"
+   ```
+
+### Step 3: System Integrity Check (Estimated Time: 10-15 minutes)
+1. **Check for Unauthorized Changes**:
+   ```bash
+   # Check for new user accounts
+   cat /etc/passwd | grep -E ":[0-9]{4}:" | tail -10
+   
+   # Check for files with SUID/SGID bits
+   find / -type f \( -perm -4000 -o -perm -2000 \) -exec ls -l {} \; 2>/dev/null
+   
+   # Check for recently modified system files
+   find /etc /bin /sbin /usr/bin /usr/sbin -type f -mtime -1 -exec ls -la {} \;
+   ```
+
+2. **Review File Access Logs**:
+   ```bash
+   # Check file access logs (if auditd is enabled)
+   ausearch -f /etc/passwd -f /etc/shadow -ts recent
+   
+   # Check for unauthorized file access
+   grep -r "DENIED" /var/log/audit/
+   
+   # Web server access logs for suspicious activity
+   tail -n 1000 /var/log/nginx/access.log | grep -E "(admin|config|\.\.)"
+   tail -n 1000 /var/log/apache2/access.log | grep -E "(admin|config|\.\.)"
+   ```
+
+3. **Network Connection Analysis**:
+   ```bash
+   # Check established connections
+   netstat -tuln | grep ESTABLISHED
+   ss -tuln
+   
+   # Monitor for unusual outbound connections
+   lsof -i -P -n | grep ESTABLISHED
+   
+   # Check for reverse shells or backdoors
+   ps aux | grep -E "(nc|netcat|bash.*tcp|sh.*tcp)"
+   ```
+
+### Step 4: Data Breach Assessment (Estimated Time: 10-20 minutes)
+1. **Check for Data Exfiltration**:
+   ```bash
+   # Monitor network traffic for large data transfers
+   iftop -i [interface]  # If available
+   nethogs  # If available
+   
+   # Check for suspicious file transfers
+   grep -E "(scp|rsync|ftp|sftp)" /var/log/auth.log
+   
+   # Database access logs
+   grep -E "(SELECT.*\*|DUMP|BACKUP)" /var/log/mysql/general.log
+   ```
+
+2. **Application-Specific Checks**:
+   ```bash
+   # Check application logs for data access
+   grep -E "(download|export|backup)" /var/log/application/app.log
+   
+   # Database query logs for suspicious activity
+   grep -E "(DROP|DELETE|UPDATE.*WHERE.*OR|UNION|--)" /var/log/mysql/slow.log
+   
+   # Check for admin panel access
+   grep -E "(/admin|/dashboard|/config)" /var/log/nginx/access.log
+   ```
+
+3. **File Integrity Verification**:
+   ```bash
+   # Run file integrity checks (if AIDE or similar is installed)
+   aide --check
+   
+   # Check critical system files
+   rpm -Va  # RHEL/CentOS
+   debsums -c  # Debian/Ubuntu
+   
+   # Verify database integrity
+   mysqlcheck --all-databases
+   ```
+
+## Root Cause Analysis Process
+1. **Attack Vector Analysis**:
+   - Analyze how attackers gained initial access
+   - Review authentication logs and patterns
+   - Check for exploited vulnerabilities or weak passwords
+   - Examine phishing or social engineering attempts
+
+2. **Timeline Reconstruction**:
+   - Create detailed timeline of security events
+   - Correlate logs from multiple systems
+   - Identify duration and scope of unauthorized access
+   - Map attacker activities and objectives
+
+3. **Vulnerability Assessment**:
+   - Review system configurations for security weaknesses
+   - Check for unpatched software vulnerabilities
+   - Analyze access control implementations
+   - Evaluate network security controls
+
+4. **Impact Assessment**:
+   - Determine what data or systems were accessed
+   - Assess potential data compromise or modification
+   - Evaluate business impact and customer exposure
+   - Check for regulatory compliance implications
+
+## Resolution Steps
+1. **Immediate Security Hardening**:
+   ```bash
+   # Implement strong SSH configuration
+   cat >> /etc/ssh/sshd_config << 'EOF'
+   PermitRootLogin no
+   PasswordAuthentication no
+   PubkeyAuthentication yes
+   MaxAuthTries 3
+   ClientAliveInterval 300
+   ClientAliveCountMax 2
+   EOF
+   systemctl restart sshd
+   ```
+
+2. **Multi-Factor Authentication Implementation**:
+   ```bash
+   # Install and configure Google Authenticator
+   apt-get install libpam-google-authenticator  # Ubuntu/Debian
+   yum install google-authenticator             # RHEL/CentOS
+   
+   # Configure PAM for MFA
+   echo "auth required pam_google_authenticator.so" >> /etc/pam.d/sshd
+   ```
+
+3. **Enhanced Monitoring and Logging**:
+   ```bash
+   # Configure auditd for detailed logging
+   cat >> /etc/audit/rules.d/audit.rules << 'EOF'
+   -w /etc/passwd -p wa -k passwd_changes
+   -w /etc/shadow -p wa -k shadow_changes
+   -w /etc/sudoers -p wa -k sudoers_changes
+   -w /var/log/auth.log -p wa -k auth_log_changes
+   EOF
+   service auditd restart
+   ```
+
+4. **Network Security Enhancement**:
+   ```bash
+   # Configure fail2ban for intrusion prevention
+   cat > /etc/fail2ban/jail.local << 'EOF'
+   [DEFAULT]
+   bantime = 3600
+   findtime = 600
+   maxretry = 3
+   
+   [sshd]
+   enabled = true
+   port = ssh
+   filter = sshd
+   logpath = /var/log/auth.log
+   maxretry = 3
+   EOF
+   systemctl restart fail2ban
+   ```
+
+## Post-Incident Activities
+1. **Security Incident Documentation**:
+   - Create detailed incident report with timeline
+   - Document all actions taken and their outcomes
+   - Record lessons learned and improvement recommendations
+   - Prepare regulatory notifications if required
+
+2. **Security Posture Assessment**:
+   - Conduct comprehensive security audit
+   - Review and update security policies and procedures
+   - Perform penetration testing to identify vulnerabilities
+   - Update incident response plans based on lessons learned
+
+3. **Staff Training and Awareness**:
+   - Conduct security awareness training for all staff
+   - Review and update security incident response procedures
+   - Test incident response procedures with tabletop exercises
+   - Update security contact lists and escalation procedures
+
+## Prevention Measures
+- Implement comprehensive security monitoring and alerting
+- Deploy intrusion detection and prevention systems
+- Establish regular security audits and vulnerability assessments
+- Implement strong authentication and access control policies
+- Set up automated security patch management
+- Create security awareness training programs for all personnel
+- Establish incident response team with clearly defined roles and responsibilities
+
+---
+
+
+SOP-010: False Alert and Missing Alert Management
+
+## Purpose
+This procedure provides systematic steps to handle false positive alerts, investigate missing critical alerts, and optimize monitoring systems to improve alert accuracy and reliability.
+
+## Scope
+Applies to all monitoring and alerting systems including infrastructure monitoring, application performance monitoring, security alerts, and business metric alerts across all environments.
+
+## Responsibilities
+- **On-call Engineer**: Investigate alerts and perform initial triage
+- **DevOps Engineer**: Configure and optimize monitoring systems
+- **Site Reliability Engineer**: Analyze alert patterns and improve signal-to-noise ratio
+- **Development Team**: Provide context for application-specific alerts
+
+## Detection Methods
+Alert system issues are indicated by:
+- Alerts firing for conditions that don't require action
+- Multiple similar alerts firing simultaneously for the same issue
+- Critical system failures that don't trigger expected alerts
+- Alerts that clear immediately without intervention
+- Stakeholder reports of issues that weren't alerted
+- High alert fatigue among on-call personnel
+
+## Immediate Response Procedure
+
+### Step 1: Alert Validation and Classification (Estimated Time: 3-5 minutes)
+1. **Verify Alert Conditions**:
+   ```bash
+   # Check current system state against alert criteria
+   # For CPU alerts:
+   top -b -n 1 | head -10
+   cat /proc/loadavg
+   
+   # For memory alerts:
+   free -h
+   cat /proc/meminfo | grep -E "(MemTotal|MemFree|MemAvailable)"
+   
+   # For disk alerts:
+   df -h
+   iostat -x 1 3
+   ```
+
+2. **Cross-Reference Multiple Data Sources**:
+   ```bash
+   # Check monitoring dashboard manually
+   curl -s "http://monitoring-server/api/metrics?query=cpu_usage&time=now"
+   
+   # Verify with system tools
+   sar -u 1 5  # CPU usage
+   sar -r 1 5  # Memory usage
+   sar -d 1 5  # Disk I/O
+   
+   # Check service health independently
+   systemctl status [service-name]
+   curl -f http://localhost:8080/health
+   ```
+
+3. **Alert Classification**:
+   - **True Positive**: Valid alert requiring action
+   - **False Positive**: Alert fired incorrectly, no action needed
+   - **Informational**: Alert indicates condition but not critical
+   - **Missing Alert**: Expected alert for known issue didn't fire
+
+### Step 2: False Positive Investigation (Estimated Time: 5-10 minutes)
+1. **Analyze Alert Threshold and Logic**:
+   ```bash
+   # Review alert configuration
+   # Prometheus example:
+   promtool query instant 'up{job="node-exporter"} == 0'
+   
+   # Check alert rule definition
+   grep -A 10 -B 5 "alert_name" /etc/prometheus/alert.rules.yml
+   
+   # Nagios example:
+   grep -A 5 -B 5 "check_command" /etc/nagios/nagios.cfg
+   ```
+
+2. **Data Quality Assessment**:
+   ```bash
+   # Check for metric collection issues
+   # Verify data source timestamp
+   curl -s "http://monitoring-server/api/metrics" | grep timestamp
+   
+   # Check for missing or stale data points
+   # Review monitoring agent logs
+   tail -n 50 /var/log/node_exporter/node_exporter.log
+   tail -n 50 /var/log/collectd/collectd.log
+   ```
+
+3. **Environmental Factors**:
+   ```bash
+   # Check for known maintenance windows
+   cat /etc/cron.d/* | grep -E "(backup|maintenance)"
+   
+   # Review recent system changes
+   rpm -qa --last | head -10  # RHEL/CentOS
+   dpkg --get-selections | grep install  # Debian/Ubuntu
+   
+   # Check for batch jobs or scheduled tasks
+   crontab -l
+   at -l
+   ```
+
+### Step 3: Missing Alert Investigation (Estimated Time: 7-12 minutes)
+1. **Verify Monitoring System Health**:
+   ```bash
+   # Check monitoring service status
+   systemctl status prometheus
+   systemctl status grafana-server
+   systemctl status alertmanager
+   
+   # Check monitoring data collection
+   curl -f http://localhost:9090/api/v1/targets  # Prometheus targets
+   
+   # Verify alert manager status
+   curl -f http://localhost:9093/api/v1/status  # Alertmanager
+   ```
+
+2. **Data Pipeline Verification**:
+   ```bash
+   # Check data ingestion
+   # Verify metrics are being collected
+   curl -s "http://localhost:9090/api/v1/query?query=up" | jq '.data.result'
+   
+   # Check for data gaps
+   # Review collection agent logs
+   grep -i "error\|fail\|timeout" /var/log/telegraf/telegraf.log
+   grep -i "error\|fail\|timeout" /var/log/collectd/collectd.log
+   ```
+
+3. **Alert Rule Testing**:
+   ```bash
+   # Test alert conditions manually
+   # Prometheus example:
+   promtool query instant 'node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100 < 10'
+   
+   # Check alert rule syntax
+   promtool check rules /etc/prometheus/alert.rules.yml
+   
+   # Verify alert routing configuration
+   amtool config routes show --config.file=/etc/alertmanager/alertmanager.yml
+   ```
+
+### Step 4: Immediate Alert Tuning (Estimated Time: 10-15 minutes)
+1. **Adjust Alert Thresholds**:
+   ```yaml
+   # Example: Tune CPU alert threshold
+   # Before (too sensitive):
+   - alert: HighCPUUsage
+     expr: node_cpu_seconds_total{mode="idle"} < 20
+     for: 1m
+   
+   # After (more appropriate):
+   - alert: HighCPUUsage
+     expr: 100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+     for: 5m
+   ```
+
+2. **Implement Alert Suppression**:
+   ```bash
+   # Silence known false positive alerts temporarily
+   amtool silence add alertname="DiskSpaceLow" instance="server1:9100" --duration=2h --comment="Known false positive during backup"
+   
+   # Create maintenance window silences
+   amtool silence add --start="2023-09-17T02:00:00Z" --end="2023-09-17T06:00:00Z" job="backup-server"
+   ```
+
+3. **Add Missing Alert Rules**:
+   ```yaml
+   # Add missing critical alerts
+   - alert: ServiceDown
+     expr: up{job="web-server"} == 0
+     for: 30s
+     labels:
+       severity: critical
+     annotations:
+       summary: "Service {{ $labels.instance }} is down"
+       description: "{{ $labels.instance }} has been down for more than 30 seconds"
+   ```
+
+## Root Cause Analysis Process
+1. **Alert Pattern Analysis**:
+   - Review alert frequency and timing patterns
+   - Analyze correlation with system events and deployments
+   - Examine alert clustering and cascade effects
+   - Identify recurring false positive patterns
+
+2. **Threshold and Logic Review**:
+   - Evaluate alert thresholds against historical data
+   - Review alert condition logic and complexity
+   - Analyze data aggregation and time windows
+   - Check for edge cases and boundary conditions
+
+3. **Monitoring Infrastructure Assessment**:
+   - Review monitoring system architecture and configuration
+   - Check data collection reliability and latency
+   - Analyze network connectivity between monitored systems
+   - Evaluate monitoring system resource utilization
+
+4. **Process and Documentation Review**:
+   - Review alert documentation and runbooks
+   - Analyze alert response procedures and effectiveness
+   - Check alert routing and escalation configuration
+   - Evaluate on-call engineer feedback and experiences
+
+## Resolution Steps
+1. **Alert Rule Optimization**:
+   ```yaml
+   # Implement multi-condition alerts to reduce false positives
+   - alert: DatabasePerformanceIssue
+     expr: |
+       (
+         mysql_global_status_slow_queries_total > 100
+         and
+         mysql_global_status_connections > 80
+         and
+         rate(mysql_global_status_questions[5m]) > 1000
+       )
+     for: 2m
+     labels:
+       severity: warning
+   ```
+
+2. **Alert Grouping and Deduplication**:
+   ```yaml
+   # Configure alert grouping to reduce noise
+   route:
+     group_by: ['alertname', 'cluster', 'service']
+     group_wait: 10s
+     group_interval: 10s
+     repeat_interval: 1h
+     receiver: 'web.hook'
+   ```
+
+3. **Context-Aware Alerting**:
+   ```bash
+   # Add business hour awareness to alerts
+   cat > business_hours_alert.yml << 'EOF'
+   - alert: HighErrorRateBusinessHours
+     expr: |
+       (
+         rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.1
+         and
+         hour() >= 9 and hour() < 17
+         and
+         day_of_week() > 0 and day_of_week() < 6
+       )
+     for: 2m
+     labels:
+       severity: critical
+   EOF
+   ```
+
+4. **Monitoring System Enhancement**:
+   ```bash
+   # Implement monitoring system self-monitoring
+   cat > monitoring_health.yml << 'EOF'
+   - alert: PrometheusTargetDown
+     expr: up == 0
+     for: 1m
+     labels:
+       severity: critical
+     annotations:
+       summary: "Monitoring target {{ $labels.instance }} is down"
+   
+   - alert: AlertmanagerDown
+     expr: up{job="alertmanager"} == 0
+     for: 30s
+     labels:
+       severity: critical
+   EOF
+   ```
+
+## Post-Incident Activities
+1. **Alert Quality Metrics**:
+   - Track false positive and false negative rates
+   - Measure mean time to acknowledge alerts
+   - Monitor alert fatigue indicators
+   - Create alert effectiveness dashboards
+
+2. **Documentation and Training**:
+   - Update alert documentation and runbooks
+   - Create troubleshooting guides for common false positives
+   - Train team members on alert triage and investigation
+   - Document alert tuning procedures and best practices
+
+3. **Process Improvements**:
+   - Implement alert review and approval processes
+   - Establish regular alert hygiene and optimization sessions
+   - Create feedback loops for on-call engineers
+   - Set up automated alert quality testing
+
+## Prevention Measures
+- Implement comprehensive monitoring system monitoring
+- Set up automated alert rule testing and validation
+- Create alert quality metrics and reporting
+- Establish regular alert review and optimization cycles
+- Implement staging environment alert testing
+- Set up alert simulation and chaos engineering practices
+
+---
+
+
+SOP-011: API Service Failure Response
+
+**Purpose**: Handle API service failures, restore service availability, and prevent cascading failures.
+
+**Detection**: HTTP 5xx errors, monitoring alerts, timeout responses, dependency failures.
+
+**Immediate Actions**:
+1. Check API service health and logs: `systemctl status api-service`, `tail -f /var/log/api/error.log`
+2. Restart API service: `systemctl restart api-service`
+3. Validate upstream/downstream dependencies: `curl -f [dependency-endpoint]/health`
+4. Implement circuit breaker if repeated failures
+5. Scale horizontally if resource constraint identified
+
+**Resolution**: Fix identified bugs, add retry logic and fallbacks, implement proper error handling, optimize database queries.
+
+---
+
+SOP-012: Cache Invalidation and Performance Issues
+
+**Purpose**: Resolve cache-related problems including stale data serving and cache service failures.
+
+**Detection**: Stale data complaints, cache hit ratio drops, cache service errors.
+
+**Immediate Actions**:
+1. Clear problematic cache manually: `redis-cli FLUSHDB`, `memcached-tool [host:port] flush_all`
+2. Restart cache service: `systemctl restart redis`, `systemctl restart memcached`
+3. Check cache connectivity: `redis-cli ping`, `telnet [memcached-host] 11211`
+4. Verify cache configuration and TTL settings
+5. Monitor cache performance metrics
+
+**Resolution**: Fix TTL configurations, implement proper cache busting strategies, add cache warming procedures.
+
+---
+
+SOP-013: Background Job and Queue Failure
+
+**Purpose**: Handle background job processing failures and queue system issues.
+
+**Detection**: Job logs show errors, scheduled tasks not executing, queue backlog growth.
+
+**Immediate Actions**:
+1. Check job scheduler status: `systemctl status cron`, `supervisorctl status`
+2. Review failed job logs: `grep -i "error\|fail" /var/log/jobs/worker.log`
+3. Retry failed jobs manually: `[job-command] --retry-failed`
+4. Check queue system: `redis-cli LLEN job_queue`, `rabbitmqctl list_queues`
+5. Scale worker processes if backlog detected
+
+**Resolution**: Fix job logic errors, increase resource allocation, implement job monitoring and alerting.
+
+---
+
+SOP-014: Configuration Error Response
+
+**Purpose**: Handle application and system configuration errors preventing proper service operation.
+
+**Detection**: Service startup failures, configuration validation errors, application crashes.
+
+**Immediate Actions**:
+1. Validate configuration syntax: `nginx -t`, `[app] --config-test`
+2. Compare with known-good configuration: `diff [current-config] [backup-config]`
+3. Rollback recent configuration changes: `git revert [config-commit]`
+4. Check environment variables: `env | grep [APP_PREFIX]`
+5. Restart services after configuration fix
+
+**Resolution**: Use configuration validation tools, automate config deployment, maintain configuration templates.
+
+---
+
+SOP-015: Logging System Failure
+
+**Purpose**: Restore logging functionality when log collection, processing, or storage fails.
+
+**Detection**: Missing log entries, log service errors, disk space issues in log directories.
+
+**Immediate Actions**:
+1. Check logging service status: `systemctl status rsyslog`, `systemctl status journald`
+2. Verify log directory permissions and disk space: `ls -la /var/log`, `df -h /var/log`
+3. Restart logging services: `systemctl restart rsyslog`
+4. Check log rotation configuration: `logrotate -d /etc/logrotate.conf`
+5. Test log generation: `logger "Test message"`
+
+**Resolution**: Fix log rotation issues, add log monitoring, configure proper retention policies.
+
+---
+
+SOP-016: Backup System Failure
+
+**Purpose**: Handle backup job failures and ensure data protection continuity.
+
+**Detection**: Backup job failures, missing backup files, storage space alerts.
+
+**Immediate Actions**:
+1. Check backup job logs: `tail -f /var/log/backup/backup.log`
+2. Verify backup storage availability: `df -h /backup`, `mount | grep backup`
+3. Test backup script manually: `/usr/local/bin/backup.sh --test`
+4. Check backup integrity: `tar -tzf [backup-file].tar.gz > /dev/null`
+5. Retry backup immediately if storage available
+
+**Resolution**: Fix backup scripts, increase storage capacity, implement backup verification procedures.
+
+---
+
+SOP-017: Time Synchronization Issues
+
+**Purpose**: Resolve system time drift and synchronization problems affecting authentication and logging.
+
+**Detection**: Time drift alerts, authentication failures, log timestamp inconsistencies.
+
+**Immediate Actions**:
+1. Check current time and NTP status: `date`, `timedatectl status`, `ntpq -p`
+2. Force time synchronization: `ntpdate -s [ntp-server]`, `chrony sources -v`
+3. Restart time services: `systemctl restart ntp`, `systemctl restart chronyd`
+4. Verify time zone configuration: `timedatectl list-timezones | grep [timezone]`
+5. Check time across multiple servers for consistency
+
+**Resolution**: Configure reliable NTP servers, monitor time drift, set up automated time sync.
+
+---
+
+SOP-018: DNS Resolution Failure
+
+**Purpose**: Resolve DNS resolution problems affecting service connectivity and name resolution.
+
+**Detection**: DNS lookup failures, connection timeouts, hostname resolution errors.
+
+**Immediate Actions**:
+1. Test DNS resolution: `nslookup [hostname]`, `dig [hostname]`, `host [hostname]`
+2. Check DNS server configuration: `cat /etc/resolv.conf`
+3. Try alternative DNS servers: `nslookup [hostname] 8.8.8.8`
+4. Restart DNS services: `systemctl restart systemd-resolved`
+5. Clear DNS cache: `systemctl flush-dns`, `nscd -i hosts`
+
+**Resolution**: Fix DNS records, use reliable DNS providers, implement DNS monitoring.
+
+---
+
+SOP-019: Service Dependency Failure
+
+**Purpose**: Handle external service dependency failures and implement fallback mechanisms.
+
+**Detection**: External service timeouts, dependency health check failures, cascading service errors.
+
+**Immediate Actions**:
+1. Check external service status: `curl -f [external-service]/status`
+2. Review service provider status pages
+3. Implement fallback logic: Enable cached responses, degrade functionality gracefully
+4. Configure circuit breaker: Temporarily disable failing dependency calls
+5. Notify service provider if SLA breach detected
+
+**Resolution**: Add retry mechanisms, implement circuit breakers, establish SLA monitoring.
+
+---
+
+SOP-020: Session Management Issues
+
+**Purpose**: Resolve user session problems including unexpected logouts and session store failures.
+
+**Detection**: User logout complaints, session errors, authentication service issues.
+
+**Immediate Actions**:
+1. Check session store service: `systemctl status redis`, `redis-cli ping`
+2. Review session configuration: Check timeout settings, verify session store connectivity
+3. Test session creation: `curl -c cookies.txt [login-endpoint]`
+4. Restart session store: `systemctl restart redis`
+5. Clear corrupted sessions: `redis-cli FLUSHDB` (if safe)
+
+**Resolution**: Fix session timeout configurations, use persistent session storage, implement session monitoring.
+
+---
+
+## Common Post-Incident Activities for All SOPs
+
+1. **Documentation**: Create detailed incident reports with timelines, root causes, and resolution steps
+2. **Monitoring**: Enhance monitoring and alerting for similar issues
+3. **Process Improvement**: Update procedures based on lessons learned
+4. **Prevention**: Implement measures to prevent recurrence
+5. **Training**: Share knowledge with team members
+6. **Automation**: Automate manual steps where possible

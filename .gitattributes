@@ -1,0 +1,41 @@
+# Text files should use LF line endings
+* text=auto
+
+# Source code
+*.py text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+*.sh text eol=lf
+
+# Docker files
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
+.dockerignore text eol=lf
+
+# Git files
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Windows batch files should use CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary files
+*.pkl binary
+*.faiss binary
+*.pyc binary
+*.pyo binary
+*.so binary
+*.dll binary
+*.exe binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.tar binary
+*.gz binary
