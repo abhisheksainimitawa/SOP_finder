@@ -1,7 +1,7 @@
 # Local SOP Finder
 
-[![Tests](https://github.com/yourusername/sop_finder_clone/workflows/Tests/badge.svg)](https://github.com/yourusername/sop_finder_clone/actions)
-[![Docker Build](https://github.com/yourusername/sop_finder_clone/workflows/Docker%20Build/badge.svg)](https://github.com/yourusername/sop_finder_clone/actions)
+[![Tests](https://github.com/abhisheksainimitawa/SOP_finder/workflows/Tests/badge.svg)](https://github.com/abhisheksainimitawa/SOP_finder/actions)
+[![Docker Build](https://github.com/abhisheksainimitawa/SOP_finder/workflows/Docker%20Build/badge.svg)](https://github.com/abhisheksainimitawa/SOP_finder/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 
@@ -183,40 +183,14 @@ See [DOCKER.md](DOCKER.md) for detailed Docker deployment instructions, includin
 - Production deployment with Kubernetes
 - Troubleshooting common issues
 
-## GitHub Setup
-
-### Publishing to GitHub
+### Pull Pre-built Docker Image
 
 ```bash
-# Initialize git repository
-git init
+# Pull from GitHub Container Registry
+docker pull ghcr.io/abhisheksainimitawa/sop_finder:latest
 
-# Add all files
-git add .
-
-# Create initial commit
-git commit -m "Initial commit: Docker-containerized SOP Finder"
-
-# Create repository on GitHub, then:
-git remote add origin https://github.com/yourusername/sop_finder_clone.git
-git branch -M main
-git push -u origin main
-```
-
-### Update Repository
-
-After pushing, update your GitHub repository:
-
-1. **Add topics**: `python`, `docker`, `machine-learning`, `faiss`, `sop`, `incident-management`
-2. **Update badges**: Replace `yourusername` in README badges with your GitHub username
-3. **Enable Actions**: GitHub Actions will automatically run tests and build Docker images
-4. **Configure Container Registry**: Settings → Actions → Enable "Read and write permissions"
-
-### Pull Published Docker Image
-
-```bash
-docker pull ghcr.io/yourusername/sop_finder_clone:latest
-docker run -it ghcr.io/yourusername/sop_finder_clone:latest
+# Run the container
+docker run -it ghcr.io/abhisheksainimitawa/sop_finder:latest
 ```
 
 ## Contributing
