@@ -47,6 +47,7 @@ class LocalSOPIdentifier:
         
         # Storage for SOPs
         self.sop_chunks = []
+        self.sop_embeddings = None
         self.faiss_index = None
         self.bm25 = None
         self.tokenized_corpus = []
@@ -129,7 +130,7 @@ class LocalSOPIdentifier:
         
         # Build semantic embeddings
         print("Generating semantic embeddings...")
-        sop_embeddings = self.encoder.encode(
+        self.sop_embeddings = self.encoder.encode(
             corpus, 
             show_progress_bar=True,
             convert_to_numpy=True
@@ -141,10 +142,10 @@ class LocalSOPIdentifier:
         self.faiss_index = faiss.IndexFlatIP(self.vector_dimension)
         
         # Normalize embeddings for cosine similarity
-        faiss.normalize_L2(sop_embeddings)
+        faiss.normalize_L2(self.sop_embeddings)
         
         # Add vectors to FAISS index
-        self.faiss_index.add(sop_embeddings)
+        self.faiss_index.add(self.sop_embeddings)
         
         # Build BM25 index
         print("Building BM25 index...")
@@ -155,6 +156,7 @@ class LocalSOPIdentifier:
         print(f"Saving index to {save_path}...")
         index_data = {
             'sop_chunks': self.sop_chunks,
+            'sop_embeddings': self.sop_embeddings,
             'tokenized_corpus': self.tokenized_corpus,
             'model_name': self.model_name,
             'vector_dimension': self.vector_dimension
@@ -190,6 +192,7 @@ class LocalSOPIdentifier:
             index_data = pickle.load(f)
         
         self.sop_chunks = index_data['sop_chunks']
+        self.sop_embeddings = index_data.get('sop_embeddings', None)
         self.tokenized_corpus = index_data['tokenized_corpus']
         self.vector_dimension = index_data.get('vector_dimension', 384)
         
@@ -251,20 +254,15 @@ class LocalSOPIdentifier:
         tokenized_query = self._tokenize(query)
         bm25_scores = self.bm25.get_scores(tokenized_query)
         
-        # Normalize scores to [0, 1] range
-        if semantic_scores.max() > 0:
-            semantic_scores_norm = semantic_scores / semantic_scores.max()
-        else:
-            semantic_scores_norm = semantic_scores
-        
+        # Normalize BM25 scores to [0, 1] range (semantic scores are already cosine similarity [0, 1])
         if bm25_scores.max() > 0:
             bm25_scores_norm = bm25_scores / bm25_scores.max()
         else:
             bm25_scores_norm = bm25_scores
         
-        # Hybrid scoring
+        # Hybrid scoring (use raw cosine similarity for semantic scores)
         hybrid_scores = (
-            semantic_weight * semantic_scores_norm + 
+            semantic_weight * semantic_scores + 
             bm25_weight * bm25_scores_norm
         )
         
@@ -277,9 +275,12 @@ class LocalSOPIdentifier:
             confidence = float(hybrid_scores[idx])
             
             # Determine confidence level
-            if confidence >= 0.7:
+            # Since we use raw cosine similarity (0-1) for semantic scores
+            # the hybrid score is: 0.6 * cosine + 0.4 * bm25_norm
+            # Adjusted thresholds for absolute confidence
+            if confidence >= 0.6:  # Very strong match
                 confidence_level = "HIGH"
-            elif confidence >= 0.4:
+            elif confidence >= 0.35:  # Moderate match
                 confidence_level = "MEDIUM"
             else:
                 confidence_level = "LOW"
@@ -290,7 +291,7 @@ class LocalSOPIdentifier:
                 'sop_number': self.sop_chunks[idx]['sop_number'],
                 'confidence_score': round(confidence, 4),
                 'confidence_level': confidence_level,
-                'semantic_score': round(float(semantic_scores_norm[idx]), 4),
+                'semantic_score': round(float(semantic_scores[idx]), 4),
                 'bm25_score': round(float(bm25_scores_norm[idx]), 4),
                 'content_preview': self.sop_chunks[idx]['content'][:200] + "..."
             })

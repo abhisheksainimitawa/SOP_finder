@@ -29,14 +29,16 @@ RUN python -c "from sentence_transformers import SentenceTransformer; \
     print('Model downloaded successfully')"
 
 # Build the search index if SOP file exists
-RUN python -c "import os; \
-    if os.path.exists('./data/structured_sops.txt'): \
-        from src.local_sop_identifier import LocalSOPIdentifier; \
-        identifier = LocalSOPIdentifier(model_name='all-MiniLM-L6-v2', cache_dir='./models'); \
-        identifier.build_index('./data/structured_sops.txt', './data/sop_index.pkl'); \
-        print('Index built successfully'); \
-    else: \
-        print('SOP file not found, index will be built on first run')"
+RUN python << 'EOF'
+import os
+if os.path.exists('./data/structured_sops.txt'):
+    from src.local_sop_identifier import LocalSOPIdentifier
+    identifier = LocalSOPIdentifier(model_name='all-MiniLM-L6-v2', cache_dir='./models')
+    identifier.build_index('./data/structured_sops.txt', './data/sop_index.pkl')
+    print('Index built successfully')
+else:
+    print('SOP file not found, index will be built on first run')
+EOF
 
 # Stage 2: Runtime - Smaller final image
 FROM python:3.11-slim
