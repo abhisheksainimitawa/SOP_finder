@@ -6,19 +6,20 @@ sentence-transformers>=2.7.0
 rank-bm25==0.2.2
 
 # FAISS for efficient vector search
-faiss-cpu>=1.9.0
+# Note: faiss-cpu 1.9.0+ requires Python 3.9+, using 1.8.0 for Python 3.8 compatibility
+faiss-cpu>=1.8.0
 
 # Scientific computing
-numpy>=1.26.0
+numpy>=1.24.0
 scikit-learn>=1.3.0
 
 # Testing
-pytest==7.4.0
-pytest-cov==4.1.0
+pytest>=7.4.0
+pytest-cov>=4.1.0
 
 # Utilities
-python-dotenv==1.0.0
-psutil==5.9.5
+python-dotenv>=1.0.0
+psutil>=5.9.5
 
 # Note: sentence-transformers will install:
 # - transformers (for model loading)
